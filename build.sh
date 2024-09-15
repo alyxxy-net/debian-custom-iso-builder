@@ -337,7 +337,151 @@ cp $TEMPMOUNT/boot/vmlinuz-* "$workdir/staging/live/vmlinuz"
 
 cp $TEMPMOUNT/boot/initrd.img-* "$workdir/staging/live/initrd"
 
-# TODO add grub config menus, build from options?
+# TODO make grub config menus customizable, build from options?
+
+# Create grub bootloader menus for 
+cat << EOF > "$WORKDIR/staging/isolinux/isolinux.cfg"
+UI vesamenu.c32
+
+MENU TITLE Boot Menu
+DEFAULT linux
+TIMEOUT 300
+MENU RESOLUTION 640 480
+MENU COLOR border       30;44   #40ffffff #a0000000 std
+MENU COLOR title        1;36;44 #9033ccff #a0000000 std
+MENU COLOR sel          7;37;40 #e0ffffff #20ffffff all
+MENU COLOR unsel        37;44   #50ffffff #a0000000 std
+MENU COLOR help         37;40   #c0ffffff #a0000000 std
+MENU COLOR timeout_msg  37;40   #80ffffff #00000000 std
+MENU COLOR timeout      1;37;40 #c0ffffff #00000000 std
+MENU COLOR msg07        37;40   #90ffffff #a0000000 std
+MENU COLOR tabmsg       31;40   #30ffffff #00000000 std
+
+LABEL linux
+  MENU LABEL Debian 11 bullseye: Single disk ext4 root
+  MENU DEFAULT
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live bootmode=bios release=bullseye disklayout=ext4_single rootpass=$rootpass user=$user userpass=$userpass
+
+LABEL linux
+  MENU LABEL Debian 11 bullseye: Single disk zfs root
+  MENU DEFAULT
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live bootmode=bios release=bullseye disklayout=zfs_single rootpass=$rootpass user=$user userpass=$userpass
+  
+LABEL linux
+  MENU LABEL Debian 11 bullseye: Single disk zfs root (encrypted)
+  MENU DEFAULT
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live bootmode=bios release=bullseye disklayout=zfs_single rootpass=$rootpass user=$user userpass=$userpass encryptionpass=$encryptionpass
+
+LABEL linux
+  MENU LABEL Debian 11 bullseye: Two disk zfs mirror root
+  MENU DEFAULT
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live bootmode=bios release=bullseye disklayout=zfs_mirror rootpass=$rootpass user=$user userpass=$userpass
+
+LABEL linux
+  MENU LABEL Debian 11 bullseye: Two disk zfs mirror root (encrypted)
+  MENU DEFAULT
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live bootmode=bios release=bullseye disklayout=zfs_mirror rootpass=$rootpass user=$user userpass=$userpass encryptionpass=$encryptionpass
+
+LABEL linux
+  MENU LABEL Debian 12 bookworm: Single disk ext4 root
+  MENU DEFAULT
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live bootmode=bios release=bookwrom disklayout=ext4_single rootpass=$rootpass user=$user userpass=$userpass
+
+LABEL linux
+  MENU LABEL Debian 12 bookworm: Single disk zfs root
+  MENU DEFAULT
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live bootmode=bios release=bookworm disklayout=zfs_single rootpass=$rootpass user=$user userpass=$userpass
+
+LABEL linux
+  MENU LABEL Debian 12 bookworm: Single disk zfs root (encrypted)
+  MENU DEFAULT
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live bootmode=bios release=bookworm disklayout=zfs_single rootpass=$rootpass user=$user userpass=$userpass encryptionpass=$encryptionpass
+
+LABEL linux
+  MENU LABEL Debian 12 bookworm: Two disk zfs mirror root
+  MENU DEFAULT
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live bootmode=bios release=bookworm disklayout=zfs_mirror rootpass=$rootpass user=$user userpass=$userpass
+
+LABEL linux
+  MENU LABEL Debian 12 bookworm: Two disk zfs mirror root (encrypted)
+  MENU DEFAULT
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live bootmode=bios release=bookworm disklayout=zfs_mirror rootpass=$rootpass user=$user userpass=$userpass encryptionpass=$encryptionpass
+EOF
+
+cat << EOF > "$WORKDIR/staging/boot/grub/grub.cfg"
+search --set=root --file /DEBIAN_CUSTOM
+
+set default="0"
+set timeout=30
+
+insmod part_gpt
+insmod part_msdos
+insmod fat
+insmod iso9660
+
+insmod all_video
+insmod font
+
+menuentry "Debian 11 bullseye: Single disk ext4 root" {
+    linux (\$root)/live/vmlinuz boot=live bootmode=efi release=bullseye disklayout=ext4_single rootpass=$rootpass user=$user userpass=$userpass
+    initrd (\$root)/live/initrd
+}
+
+menuentry "Debian 11 bullseye: Single disk zfs root" {
+    linux (\$root)/live/vmlinuz boot=live bootmode=efi release=bullseye disklayout=zfs_single rootpass=$rootpass user=$user userpass=$userpass
+    initrd (\$root)/live/initrd
+}
+
+menuentry "Debian 11 bullseye: Single disk zfs root (encrypted)" {
+    linux (\$root)/live/vmlinuz boot=live bootmode=efi release=bullseye disklayout=zfs_single rootpass=$rootpass user=$user userpass=$userpass encryptionpass=$encryptionpass
+    initrd (\$root)/live/initrd
+}
+
+menuentry "Debian 11 bullseye: Two disk zfs mirror root" {
+    linux (\$root)/live/vmlinuz boot=live bootmode=efi release=bullseye disklayout=zfs_mirror rootpass=$rootpass user=$user userpass=$userpass
+    initrd (\$root)/live/initrd
+}
+
+menuentry "Debian 11 bullseye: Two disk zfs mirror root (encrypted)" {
+    linux (\$root)/live/vmlinuz boot=live bootmode=efi release=bullseye disklayout=zfs_mirror rootpass=$rootpass user=$user userpass=$userpass encryptionpass=$encryptionpass
+    initrd (\$root)/live/initrd
+}
+
+menuentry "Debian 12 bookworm: Single disk ext4 root" {
+    linux (\$root)/live/vmlinuz boot=live bootmode=efi release=bookworm disklayout=ext4_single rootpass=$rootpass user=$user userpass=$userpass
+    initrd (\$root)/live/initrd
+}
+
+menuentry "Debian 12 bookworm: Single disk zfs root" {
+    linux (\$root)/live/vmlinuz boot=live bootmode=efi release=bookworm disklayout=zfs_single rootpass=$rootpass user=$user userpass=$userpass
+    initrd (\$root)/live/initrd
+}
+
+menuentry "Debian 12 bookworm: Single disk zfs root (encrypted)" {
+    linux (\$root)/live/vmlinuz boot=live bootmode=efi release=bookworm disklayout=zfs_single rootpass=$rootpass user=$user userpass=$userpass encryptionpass=$encryptionpass
+    initrd (\$root)/live/initrd
+}
+
+menuentry "Debian 12 bookworm: Two disk zfs mirror root" {
+    linux (\$root)/live/vmlinuz boot=live bootmode=efi release=bookworm disklayout=zfs_mirror rootpass=$rootpass user=$user userpass=$userpass
+    initrd (\$root)/live/initrd
+}
+
+menuentry "Debian 12 bookworm: Two disk zfs mirror root (encrypted)" {
+    linux (\$root)/live/vmlinuz boot=live bootmode=efi release=bookworm disklayout=zfs_mirror rootpass=$rootpass user=$user userpass=$userpass encryptionpass=$encryptionpass
+    initrd (\$root)/live/initrd
+}
+EOF
 
 cat << 'EOF' > "$workdir/tmp/grub-standalone.cfg"
 search --set=root --file /DEBIAN_CUSTOM
@@ -363,7 +507,6 @@ mmd -i "$workdir/staging/EFI/boot/efiboot.img efi efi/boot"
 
 mcopy -vi "$workdir/staging/EFI/boot/efiboot.img" "$workdir/tmp/bootx64.efi" "$workdir/staging/boot/grub/grub.cfg" ::efi/boot/
 
-# TODO make iso filename customizable
 xorriso -as mkisofs -iso-level 3 -o "$workdir/$outputfile.iso" -full-iso9660-filenames -volid "DEBIAN_CUSTOM" -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin -eltorito-boot isolinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table --eltorito-catalog isolinux/isolinux.cat -eltorito-alt-boot -e /EFI/boot/efiboot.img -no-emul-boot -isohybrid-gpt-basdat -append_partition 2 0xef "$workdir"/staging/EFI/boot/efiboot.img "$workdir/staging"
 
 chmod a+r "$workdir/$outputfile.iso"
