@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Set the default values for how the script will run
+# These values can be set in an optional config file and loaded separately wthout modifing the script
 
 # These values are divided into three sections based on what part of the process they affect: 
 
@@ -12,6 +13,8 @@
 # Section 1: Build script behavior
 
 export runmode=interactive # Define how the script will run: interactive will prompt for values and walk through the options, non-interactive will run immediately using the default values or the values provided by the flags/options (string, set through opional script flag, valid options are interactive/noninteractive)
+
+export outputfile=debian_custom # Define the default name of the live system iso if not provided by user (String, set through script input, any valid filename)
 
 export workdir=/live-build # Set the directory that the script will work out of, this directory will be created by the script. The script will exit and fail if the directory already exists on the system (string, any valid filesystem path)
 
@@ -55,7 +58,7 @@ fi
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
-while getopts n-:w:k-:d:t:c:l:s:f-:w:a:i-:r:u:p:o-:e:h- OPT; do
+while getopts n-:x:w:k-:d:t:c:l:s:f-:w:a:i-:r:u:p:o-:e:h- OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -117,9 +120,15 @@ while getopts n-:w:k-:d:t:c:l:s:f-:w:a:i-:r:u:p:o-:e:h- OPT; do
     h | help)
 cat << EOF >&2
 Usage: 
-./build.sh [options]
-./build.sh [options] /path/to/configfile
-configfile is optional and loaded using source command
+./build.sh [options] <outputfile> <configfile>
+configfile is optional set of defaults and loaded using source command
+configfile must be the first argument provided to the script if used
+priority for options used: [options] > configfile > script defaults
+
+Examples:
+./build.sh 
+./build.sh --outputfile=myCustomInstaller.iso
+./build.sh /path/to/<configfile> --noninteractive -w /mnt
 
 Options: 
 
@@ -128,6 +137,8 @@ build script behavior:
                                          non-interactively using the 
                                          options provided and not 
                                          prompting for further input
+[-x, --outputfile=<filename>]            name of the iso created
+                                         (default: debian_custom)
 [-w, --workdir=</path/to/directory>]     directory that the script 
                                          will work out of, directory 
                                          will be created by script 
@@ -207,7 +218,10 @@ done
 
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
+export outputfile="$(sed 's/.iso$//g' <<< $outputfile)" # Strip .iso from the end of the outputfile variable if present, it will be added back later. This allows provided names to be valid with or without the extension.
+
 # TODO remove trailing slashes from path variables to avoid issues
+# TODO full option validation
 
 export TEMPMOUNT="$workdir/chroot" # Set extra variable for the root of the live system
 
@@ -350,17 +364,22 @@ mmd -i "$workdir/staging/EFI/boot/efiboot.img efi efi/boot"
 mcopy -vi "$workdir/staging/EFI/boot/efiboot.img" "$workdir/tmp/bootx64.efi" "$workdir/staging/boot/grub/grub.cfg" ::efi/boot/
 
 # TODO make iso filename customizable
-xorriso -as mkisofs -iso-level 3 -o "$workdir/debian-custom.iso" -full-iso9660-filenames -volid "DEBIAN_CUSTOM" -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin -eltorito-boot isolinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table --eltorito-catalog isolinux/isolinux.cat -eltorito-alt-boot -e /EFI/boot/efiboot.img -no-emul-boot -isohybrid-gpt-basdat -append_partition 2 0xef "$workdir"/staging/EFI/boot/efiboot.img "$workdir/staging"
+xorriso -as mkisofs -iso-level 3 -o "$workdir/$outputfile.iso" -full-iso9660-filenames -volid "DEBIAN_CUSTOM" -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin -eltorito-boot isolinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table --eltorito-catalog isolinux/isolinux.cat -eltorito-alt-boot -e /EFI/boot/efiboot.img -no-emul-boot -isohybrid-gpt-basdat -append_partition 2 0xef "$workdir"/staging/EFI/boot/efiboot.img "$workdir/staging"
 
-chmod a+r "$workdir/debian-custom.iso"
+chmod a+r "$workdir/$outputfile.iso"
 
-cp "$workdir/debian-custom.iso" "$iso_target"
+cp "$workdir/$outputfile.iso" "$iso_target"
 
 # Clean up (delete) working directory after script finishes
 if [ "$keep_workdir"='no' -a "$keep_workdir"='No' -a "$keep_workdir"='n' -a "$keep_workdir"='N' ]; then
   rm -r "$workdir"
 
-else
+elif [ "$keep_workdir"='yes' -a "$keep_workdir"='Yes' -a "$keep_workdir"='y' -a "$keep_workdir"='Y' ]; then
   echo "Working directory and contents left intact at $workdir"
+
+else
+  echo "Invalid option set for keep_workdir option, this should have been caught earlier when validating script options"
+  echo "Working directory and contents have been left intact at $workdir"
+  echo "You may want to manually delete this directory if this outcome is not desired"
 fi
 
