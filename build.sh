@@ -15,7 +15,7 @@ export runmode=interactive # Define how the script will run: interactive will pr
 
 export workdir=/live-build # Set the directory that the script will work out of, this directory will be created by the script. The script will exit and fail if the directory already exists on the system (string, any valid filesystem path)
 
-export keep_workdir=no # Tells the script to not delete the working directory when finshed (string, set through opional script flag, valid options are yes/no/Yes/No/YES/NO/y/n/Y/N/true/false/True/False/TRUE/FALSE/t/f/T/F)
+export keep_workdir=no # Tells the script to not delete the working directory when finshed (string, set through opional script flag, valid options are yes/no/Yes/No/y/n/Y/N)
 
 export scriptdir="$(pwd)" # The directory containing the install script to be run by the live system iso, this defaults to your current directory and assumes that you are running the build script out the repo that also contains the install script (string, any valid filesystem path that contains the "install.sh" file)
 
@@ -30,9 +30,9 @@ export liverootpass=changeme # Set the root password for the live system to be b
 
 export scriptpath="/root/debian-custom-iso-builder" # Set the filesystem path on the live system to run the install script from (string, any valid filesystem path)
 
-export offline=no # Configure the live system iso for offline installs. Downloads all packages needed for system installation to the live system iso and creates a local repository to install from instead of installing packages over the internet. Warning: using this option will greatly increase the iso size (string, set through opional script flag, valid options are yes/no/Yes/No/YES/NO/y/n/Y/N/true/false/True/False/TRUE/FALSE/t/f/T/F)
+export offline=no # Configure the live system iso for offline installs. Downloads all packages needed for system installation to the live system iso and creates a local repository to install from instead of installing packages over the internet. Warning: using this option will greatly increase the iso size (string, set through opional script flag, valid options are yes/no/Yes/No/y/n/Y/N)
 
-export use_wifi=no # Configure the live system iso to connect to a wifi ssid for system installation. (string, set through opional script flag for setting wifi ssid to connect to, valid options are yes/no/Yes/No/YES/NO/y/n/Y/N/true/false/True/False/TRUE/FALSE/t/f/T/F)
+export use_wifi=no # Configure the live system iso to connect to a wifi ssid for system installation. (string, set through opional script flag for setting wifi ssid to connect to, valid options are yes/no/Yes/No/y/n/Y/N)
 
 # Section 3: Installed system configuration
 
@@ -42,9 +42,15 @@ export user=ansible # Set the account to be created for the installed system by 
 
 export userpass=changeme # Set the user password for the installed system by the built iso, this is set through the bootloader aguments and is viewable by anyone booting the iso. This can be edited and changed when booting the built iso for additional security (any string)
 
-export user_sudo=no # Set elevated permissions for the account created for the installed system by the built iso, this is set through the bootloader aguments and is viewable by anyone booting the iso. This can be edited and changed when booting the built iso (string, valid options are yes/no/Yes/No/YES/NO/y/n/Y/N/true/false/True/False/TRUE/FALSE/t/f/T/F)
+export user_sudo=no # Set elevated permissions for the account created for the installed system by the built iso, this is set through the bootloader aguments and is viewable by anyone booting the iso. This can be edited and changed when booting the built iso (string, valid options are yes/no/Yes/No/y/n/Y/N)
 
 export encryptionpass=changeme # Set the disk encryption password for the installed system by the built iso, this is set through the bootloader aguments and is viewable by anyone booting the iso. This can be edited and changed when booting the built iso for additional security (any string)
+
+# Allow setting a user defined config file to overwrite script default behavior
+export config="$1"
+if [ -f "$config" ]; then
+  source "$config" || echo "failed to load configuration file, the config is loaded with the source command and must be in the format of a shell script. Example line to change the default runmode: export runmode=noninteractive"
+fi
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
@@ -110,8 +116,12 @@ while getopts n-:w:k-:d:t:c:l:s:f-:w:a:i-:r:u:p:o-:e:h- OPT; do
       ;;
     h | help)
 cat << EOF >&2
-script usage: 
+Usage: 
 ./build.sh [options]
+./build.sh [options] /path/to/configfile
+configfile is optional and loaded using source command
+
+Options: 
 
 build script behavior:
 [-n, --noninteractive]                   sets the build script to run
@@ -197,9 +207,160 @@ done
 
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
-export tempmount="$workdir/chroot"
+# TODO remove trailing slashes from path variables to avoid issues
 
-export DEBIAN_FRONTEND=noninteractive
+export TEMPMOUNT="$workdir/chroot" # Set extra variable for the root of the live system
 
-export LC_ALL=C
+export DEBIAN_FRONTEND=noninteractive # Supress the apt configuration messages
+
+export LC_ALL=C # Set basic locale for script functionality
+
+mkdir -p "$workdir"/{staging/{EFI/boot,boot/grub/x86_64-efi,isolinux,live},tmp}
+
+mkdir -p $TEMPMOUNT
+
+debootstrap $codename $TEMPMOUNT
+
+# Setup apt sources
+
+# Check for debian oldstable release, this predates the non-free category being broken up into non-free and non-free-firmware
+if [[ "$codename" = 'bullseye' ]]; then
+
+cat << EOF > $TEMPMOUNT/etc/apt/sources.list
+deb http://deb.debian.org/debian $codename main contrib non-free
+EOF
+
+else
+
+cat << EOF > $TEMPMOUNT/etc/apt/sources.list
+deb http://deb.debian.org/debian $codename main contrib non-free non-free-firmware
+EOF
+
+fi
+
+# Set hostname info 
+# TODO: add customization options for hostname and domain name support in live installer and installed systems
+echo "debian-live" > $TEMPMOUNT/etc/hostname
+
+echo "127.0.1.1 debian-live" >> $TEMPMOUNT/etc/hosts
+
+# Create and setup required system mounts
+mkdir -p $TEMPMOUNT/dev/pts
+
+mkdir -p $TEMPMOUNT/proc
+
+mkdir -p $TEMPMOUNT/sys
+
+chroot $TEMPMOUNT /bin/bash -c "mount none -t proc /proc"
+chroot $TEMPMOUNT /bin/bash -c "mount none -t sysfs /sys"
+chroot $TEMPMOUNT /bin/bash -c "mount none -t devpts /dev/pts"
+
+cp /etc/resolv.conf $TEMPMOUNT/etc/resolv.conf
+
+# Install packages
+# TODO: Strip down to bare essentials and add customization ability to append packages
+# TODO: Add offline install code
+chroot $TEMPMOUNT /bin/bash -c "apt -y update"
+
+chroot $TEMPMOUNT /bin/bash -c "apt install -y dpkg-dev linux-headers-amd64 linux-image-amd64 systemd-sysv firmware-linux dosfstools debootstrap gdisk dkms dpkg-dev sed git vim efibootmgr live-boot openssh-server tmux systemd-timesyncd firmware-iwlwifi network-manager qemu-guest-agent firmware-libertas cryptsetup"
+
+
+# Setup zfs support in live environment
+# TODO make optional, add btrfs and LVM support
+chroot $TEMPMOUNT /bin/bash -c "apt install -y --no-install-recommends zfs-dkms zfsutils-linux"
+
+mkdir $TEMPMOUNT/root/zbm
+
+wget https://get.zfsbootmenu.org/efi -O $TEMPMOUNT/root/zbm/vmlinuz.EFI
+
+# Create service to autologin as root on boot
+mkdir $TEMPMOUNT/etc/systemd/system/getty@tty1.service.d
+cat << 'EOF' > $TEMPMOUNT/etc/systemd/system/getty@tty1.service.d/override.conf
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root %I $TERM
+EOF
+
+# Allow root ssh login to live system
+# TODO make optional: provide configuration or grub menu options (try modifing bash profile to modify sshd config on boot and restart sshd ) for disallowing ssh, allowing with key, or allowing with password
+sed -i '/PermitRootLogin/c\PermitRootLogin\ yes' $TEMPMOUNT/etc/ssh/sshd_config
+
+# Setup bash profile to run the install script in a tmux session on non ssh login and attach tmux session on ssh logins
+cat << EOF > $TEMPMOUNT/root/.bash_profile
+[ -z "\$SSH_TTY" ] && tmux new-session -s auto_install "$scriptpath/install.sh"
+[ -n "\$SSH_TTY" ] && tmux attach-session
+EOF
+
+# Set root password for live system iso
+chroot $TEMPMOUNT /bin/bash -c "echo root:$liverootpass | chpasswd" 
+
+# TODO wifi setup code
+# TODO add wifi options for connection behavior (wait time, always connect, connect if network not already present)
+# TODO move wifi options from configuration to grub menu options... already modifiable in grub menu manually
+
+cp -r "$scriptdir" "$scriptpath"
+
+# Copy config file in use to live system iso and rename it so that the install script can find it
+# TODO test ownership/permissions issues from copying in script directory and config
+if [ -f "$config" ]; then
+  cp "$config" "$scriptpath"
+  config=${config##*/}
+  mv "$scriptpath/$config" "$scriptdir/config.sh"
+fi
+
+# Cleanup live environment
+chroot $TEMPMOUNT /bin/bash -c "apt clean"
+chroot $TEMPMOUNT /bin/bash -c "rm -rf /tmp/*"
+chroot $TEMPMOUNT /bin/bash -c "rm /etc/resolv.conf"
+chroot $TEMPMOUNT /bin/bash -c "umount -lf /dev/pts"
+chroot $TEMPMOUNT /bin/bash -c "umount -lf /sys"
+chroot $TEMPMOUNT /bin/bash -c "umount -lf /proc"
+
+# Create bootable iso from live environment
+mksquashfs $TEMPMOUNT "$workdir/staging/live/filesystem.squashfs" -e boot
+
+cp $TEMPMOUNT/boot/vmlinuz-* "$workdir/staging/live/vmlinuz"
+
+cp $TEMPMOUNT/boot/initrd.img-* "$workdir/staging/live/initrd"
+
+# TODO add grub config menus, build from options?
+
+cat << 'EOF' > "$workdir/tmp/grub-standalone.cfg"
+search --set=root --file /DEBIAN_CUSTOM
+set prefix=($root)/boot/grub/
+configfile /boot/grub/grub.cfg
+EOF
+
+touch "$workdir/staging/DEBIAN_CUSTOM"
+
+cp /usr/lib/ISOLINUX/isolinux.bin "$workdir/staging/isolinux/" 
+
+cp /usr/lib/syslinux/modules/bios/* "$workdir/staging/isolinux/"
+
+cp -r /usr/lib/grub/x86_64-efi/* "$workdir/staging/boot/grub/x86_64-efi/"
+
+grub-mkstandalone --locales="" --themes="" --fonts="" --format=x86_64-efi --modules="part_gpt part_msdos fat iso9660" --output="$workdir/tmp/bootx64.efi" "boot/grub/grub.cfg=$workdir/tmp/grub-standalone.cfg"
+
+dd if=/dev/zero of="$workdir/staging/EFI/boot/efiboot.img" bs=1M count=20
+
+mkfs.vfat "$workdir/staging/EFI/boot/efiboot.img"
+
+mmd -i "$workdir/staging/EFI/boot/efiboot.img efi efi/boot"
+
+mcopy -vi "$workdir/staging/EFI/boot/efiboot.img" "$workdir/tmp/bootx64.efi" "$workdir/staging/boot/grub/grub.cfg" ::efi/boot/
+
+# TODO make iso filename customizable
+xorriso -as mkisofs -iso-level 3 -o "$workdir/debian-custom.iso" -full-iso9660-filenames -volid "DEBIAN_CUSTOM" -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin -eltorito-boot isolinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table --eltorito-catalog isolinux/isolinux.cat -eltorito-alt-boot -e /EFI/boot/efiboot.img -no-emul-boot -isohybrid-gpt-basdat -append_partition 2 0xef "$workdir"/staging/EFI/boot/efiboot.img "$workdir/staging"
+
+chmod a+r "$workdir/debian-custom.iso"
+
+cp "$workdir/debian-custom.iso" "$iso_target"
+
+# Clean up (delete) working directory after script finishes
+if [ "$keep_workdir"='no' -a "$keep_workdir"='No' -a "$keep_workdir"='n' -a "$keep_workdir"='N' ]; then
+  rm -r "$workdir"
+
+else
+  echo "Working directory and contents left intact at $workdir"
+fi
 
